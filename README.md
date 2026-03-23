@@ -27,6 +27,14 @@ The workflow builds with `GITHUB_PAGES_BASE=/ai-life/` so assets load correctly 
 
 (If you rename the repository, the workflow uses `github.event.repository.name` automatically; the site URL path matches the repo name.)
 
+## Vercel
+
+The project is linked to Vercel with [`vercel.json`](vercel.json) (Vite build → `dist`, SPA rewrite). Production:
+
+**https://ai-life-nu.vercel.app**
+
+Pushes to the connected GitHub repo deploy automatically. Local CLI: `npx vercel` (preview) or `npx vercel deploy --prod`.
+
 ## Tech stack
 
 React 19, TypeScript, Vite 8.
