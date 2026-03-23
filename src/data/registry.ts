@@ -1,10 +1,11 @@
 import type { ComponentItem, IntegrationDef, SectionGroup } from '../types/lifeSystem'
+import { csvProjectsSection } from './csvProjectsSection'
 
 const c = (
   id: string,
   label: string,
   defaultStatus: ComponentItem['defaultStatus'],
-  extra?: Partial<Pick<ComponentItem, 'notes' | 'tool'>>,
+  extra?: Partial<Pick<ComponentItem, 'notes' | 'tool' | 'repo'>>,
 ): ComponentItem => ({
   id,
   label,
@@ -19,12 +20,21 @@ export const sectionGroups: SectionGroup[] = [
     title: 'Time & decision',
     description: 'Calendar intelligence, energy, and prioritization.',
     components: [
-      c('td-cal', 'Calendar intelligence (auto-prioritized days)', 'implemented'),
+      c('td-cal', 'Calendar intelligence (auto-prioritized days)', 'can_do', {
+        notes: 'No dedicated calendar repo yet; uses external calendars',
+      }),
       c('td-energy', 'Energy-based scheduling', 'can_do'),
-      c('td-daily', 'Daily decision engine (“What should I do?”)', 'planned'),
+      c('td-daily', 'Daily decision engine (“What should I do?”)', 'in_progress', {
+        repo: 'SiskelBot',
+        notes: 'Agent-style assistant bot',
+      }),
       c('td-weekly', 'Weekly optimization reports', 'planned'),
       c('td-focus', 'Focus block generation', 'in_progress', {
-        notes: 'On calendar',
+        repo: 'central-command',
+        notes: 'Command / planning hub',
+      }),
+      c('td-os', 'Life OS coverage registry (this app)', 'implemented', {
+        repo: 'ai-life',
       }),
     ],
   },
@@ -33,10 +43,17 @@ export const sectionGroups: SectionGroup[] = [
     kind: 'layer',
     title: 'Social & relationships',
     components: [
-      c('soc-track', 'Social tracking (who / frequency)', 'planned'),
-      c('soc-health', 'Relationship health scoring', 'planned'),
+      c('soc-track', 'Social tracking (who / frequency)', 'implemented', {
+        repo: 'social-circles',
+      }),
+      c('soc-health', 'Relationship health scoring', 'in_progress', {
+        repo: 'SeattleSocial',
+        notes: 'Also Seattle-Social-Demo',
+      }),
       c('soc-outreach', 'Smart outreach suggestions', 'planned'),
-      c('soc-party', 'Party planning + guest optimization', 'planned'),
+      c('soc-party', 'Party planning + guest optimization', 'implemented', {
+        repo: 'party-commander',
+      }),
       c('soc-dating', 'Dating insights + pattern detection', 'planned'),
     ],
   },
@@ -46,8 +63,12 @@ export const sectionGroups: SectionGroup[] = [
     title: 'Personal brand',
     components: [
       c('brand-voice', 'Voice / tone modeling', 'planned'),
-      c('brand-content', 'Content generation (posts, essays)', 'planned'),
-      c('brand-pipeline', 'Idea capture → publish pipeline', 'planned'),
+      c('brand-content', 'Content generation (posts, essays)', 'in_progress', {
+        repo: 'ComedyCountry',
+      }),
+      c('brand-pipeline', 'Idea capture → publish pipeline', 'in_progress', {
+        repo: 'creative-hub',
+      }),
       c('brand-perf', 'Performance tracking (what resonates)', 'planned'),
     ],
   },
@@ -56,10 +77,21 @@ export const sectionGroups: SectionGroup[] = [
     kind: 'layer',
     title: 'Memory & life logging',
     components: [
-      c('mem-daily', 'Daily activity logging', 'planned'),
-      c('mem-enjoy', 'Enjoyment tracking', 'planned'),
-      c('mem-highlights', 'Life highlights generation', 'planned'),
-      c('mem-graph', 'Personal knowledge graph', 'planned'),
+      c('mem-daily', 'Daily activity logging', 'in_progress', {
+        repo: 'i-am-drunk',
+        notes: 'Drink / session logging',
+      }),
+      c('mem-enjoy', 'Enjoyment tracking', 'in_progress', {
+        repo: 'i-am-drunk',
+        notes: 'Wrapped-style recap',
+      }),
+      c('mem-highlights', 'Life highlights generation', 'in_progress', {
+        repo: 'deep-seats',
+        notes: 'Sports journey tracker; deep-seats1 prototype',
+      }),
+      c('mem-graph', 'Personal knowledge graph', 'implemented', {
+        repo: 'AIKnowledgeBase',
+      }),
     ],
   },
   {
@@ -67,10 +99,19 @@ export const sectionGroups: SectionGroup[] = [
     kind: 'layer',
     title: 'Opportunity detection',
     components: [
-      c('opp-events', 'Event discovery (sports, concerts, networking)', 'planned'),
+      c('opp-events', 'Event discovery (sports, concerts, networking)', 'implemented', {
+        repo: 'hoops-intel',
+        notes:
+          'Also day2-big-dance, ModernSportsIntelligenceDemo, world-sports, high-school-sports-master-db',
+      }),
       c('opp-invest', 'Investment alerts', 'planned'),
-      c('opp-social', 'Social opportunity detection', 'planned'),
-      c('opp-tonight', '“You should do this tonight” engine', 'planned'),
+      c('opp-social', 'Social opportunity detection', 'in_progress', {
+        repo: 'pulse-app',
+        notes: 'Venue / night-out energy',
+      }),
+      c('opp-tonight', '“You should do this tonight” engine', 'implemented', {
+        repo: 'LateNightVibesSeattle',
+      }),
     ],
   },
   {
@@ -78,8 +119,13 @@ export const sectionGroups: SectionGroup[] = [
     kind: 'domain',
     title: 'Home',
     components: [
-      c('home-grocery', 'Smart grocery prediction', 'planned'),
-      c('home-inv', 'Inventory tracking (fridge / pantry)', 'planned'),
+      c('home-grocery', 'Smart grocery prediction', 'implemented', {
+        repo: 'budget-grocery-list',
+      }),
+      c('home-inv', 'Inventory tracking (fridge / pantry)', 'implemented', {
+        repo: 'Chromacloset',
+        notes: 'Wardrobe / closet by color',
+      }),
       c('home-clean', 'Cleaning automation triggers', 'planned'),
       c('home-devices', 'Smart device orchestration', 'planned'),
     ],
@@ -89,10 +135,16 @@ export const sectionGroups: SectionGroup[] = [
     kind: 'domain',
     title: 'Food',
     components: [
-      c('food-meal', 'Meal recommendations (goal + mood)', 'planned'),
+      c('food-meal', 'Meal recommendations (goal + mood)', 'in_progress', {
+        repo: 'SchaferFamilyCookbook',
+      }),
       c('food-rest', 'Restaurant ranking (vibe, health, social)', 'planned'),
-      c('food-learn', 'Food preference learning', 'planned'),
-      c('food-order', 'Automated ordering optimization', 'planned'),
+      c('food-learn', 'Food preference learning', 'implemented', {
+        repo: 'SchaferFamilyCookbook',
+      }),
+      c('food-order', 'Automated ordering optimization', 'in_progress', {
+        repo: 'budget-grocery-list',
+      }),
       c('food-nutri', 'Nutrition impact scoring', 'external', {
         tool: 'Nourish',
       }),
@@ -168,7 +220,10 @@ export const sectionGroups: SectionGroup[] = [
     components: [
       c('mh-mood', 'Mood tracking', 'planned'),
       c('mh-trigger', 'Trigger identification', 'planned'),
-      c('mh-pattern', 'Pattern detection', 'planned'),
+      c('mh-pattern', 'Pattern detection', 'in_progress', {
+        repo: 'spine-scanner',
+        notes: 'Vision / posture inference pipeline',
+      }),
     ],
   },
   {
@@ -193,8 +248,14 @@ export const sectionGroups: SectionGroup[] = [
     kind: 'domain',
     title: 'Entertainment — music',
     components: [
-      c('music-mood', 'Mood-based playlists', 'planned'),
-      c('music-disc', 'Discovery engine', 'planned'),
+      c('music-mood', 'Mood-based playlists', 'in_progress', {
+        repo: 'pulse-app',
+        notes: 'Venue energy ↔ mood',
+      }),
+      c('music-disc', 'Discovery engine', 'implemented', {
+        repo: 'pulse',
+        notes: 'Also Pulse-Google-Version',
+      }),
     ],
   },
   {
@@ -203,7 +264,9 @@ export const sectionGroups: SectionGroup[] = [
     title: 'Entertainment — movies / TV',
     components: [
       c('screen-rec', 'Taste-based recommendations', 'planned'),
-      c('screen-tonight', '“Tonight” planner', 'planned'),
+      c('screen-tonight', '“Tonight” planner', 'implemented', {
+        repo: 'LateNightVibesSeattle',
+      }),
     ],
   },
   {
@@ -218,15 +281,24 @@ export const sectionGroups: SectionGroup[] = [
     id: 'ent-dance',
     kind: 'domain',
     title: 'Entertainment — dancing',
-    components: [c('dance-venue', 'Venue + event discovery', 'planned')],
+    components: [
+      c('dance-venue', 'Venue + event discovery', 'implemented', {
+        repo: 'LateNightVibesSeattle',
+      }),
+    ],
   },
   {
     id: 'ent-collect',
     kind: 'domain',
     title: 'Entertainment — collecting',
     components: [
-      c('coll-value', 'Value tracking', 'planned'),
-      c('coll-alerts', 'Market alerts', 'planned'),
+      c('coll-value', 'Value tracking', 'implemented', {
+        repo: 'Holocron-Cards',
+        notes: 'Also StarWarsApp',
+      }),
+      c('coll-alerts', 'Market alerts', 'in_progress', {
+        repo: 'star-wars-card-tracker',
+      }),
     ],
   },
   {
@@ -243,9 +315,15 @@ export const sectionGroups: SectionGroup[] = [
     kind: 'domain',
     title: 'Travel',
     components: [
-      c('tr-gen', 'Trip generation', 'planned'),
-      c('tr-pack', 'Packing optimization', 'planned'),
-      c('tr-itin', 'Itinerary automation', 'planned'),
+      c('tr-gen', 'Trip generation', 'implemented', {
+        repo: 'Wanderlog',
+      }),
+      c('tr-pack', 'Packing optimization', 'in_progress', {
+        repo: 'scottsdale-trip',
+      }),
+      c('tr-itin', 'Itinerary automation', 'in_progress', {
+        repo: 'scottsdale-trip',
+      }),
     ],
   },
   {
@@ -266,7 +344,9 @@ export const sectionGroups: SectionGroup[] = [
     title: 'Learning — writing',
     components: [
       c('lw-style', 'Style analysis', 'planned'),
-      c('lw-expand', 'Idea expansion', 'planned'),
+      c('lw-expand', 'Idea expansion', 'in_progress', {
+        repo: 'creative-hub',
+      }),
       c('lw-workshop', 'Workshop simulation', 'planned'),
     ],
   },
@@ -275,9 +355,16 @@ export const sectionGroups: SectionGroup[] = [
     kind: 'domain',
     title: 'Learning — coding',
     components: [
-      c('lc-assist', 'AI-assisted development', 'can_do'),
-      c('lc-mvp', 'Auto-MVP generation', 'planned'),
-      c('lc-debug', 'Debugging agents', 'planned'),
+      c('lc-assist', 'AI-assisted development', 'implemented', {
+        notes: 'Shipped portfolio (Vite/TS, agents, APIs)',
+      }),
+      c('lc-mvp', 'Auto-MVP generation', 'in_progress', {
+        repo: 'autoresearch',
+        notes: 'Fork: agent research loop',
+      }),
+      c('lc-debug', 'Debugging agents', 'in_progress', {
+        repo: 'SiskelBot',
+      }),
     ],
   },
   {
@@ -285,8 +372,12 @@ export const sectionGroups: SectionGroup[] = [
     kind: 'domain',
     title: 'Learning — general',
     components: [
-      c('lg-curriculum', 'Personalized curriculum', 'planned'),
-      c('lg-retention', 'Knowledge retention tracking', 'planned'),
+      c('lg-curriculum', 'Personalized curriculum', 'in_progress', {
+        repo: 'AIKnowledgeBase',
+      }),
+      c('lg-retention', 'Knowledge retention tracking', 'in_progress', {
+        repo: 'AIKnowledgeBase',
+      }),
     ],
   },
   {
@@ -306,19 +397,28 @@ export const sectionGroups: SectionGroup[] = [
     title: 'Transportation',
     components: [
       c('trans-route', 'Route optimization (mood-based)', 'planned'),
-      c('trans-move', 'Movement tracking', 'planned'),
+      c('trans-move', 'Movement tracking', 'in_progress', {
+        repo: 'StepSprint',
+      }),
       c('trans-score', 'Activity scoring', 'planned'),
       c('trans-ride', 'Ride timing optimization', 'planned'),
     ],
   },
+  csvProjectsSection,
   {
     id: 'productivity',
     kind: 'addon',
     title: 'Productivity',
     components: [
-      c('prod-prio', 'Task prioritization', 'planned'),
-      c('prod-todo', 'Context-aware to-do lists', 'planned'),
-      c('prod-focus', 'Focus tracking', 'planned'),
+      c('prod-prio', 'Task prioritization', 'in_progress', {
+        repo: 'central-command',
+      }),
+      c('prod-todo', 'Context-aware to-do lists', 'implemented', {
+        repo: '2026GoalTracker',
+      }),
+      c('prod-focus', 'Focus tracking', 'in_progress', {
+        repo: 'central-command',
+      }),
     ],
   },
   {
@@ -326,9 +426,15 @@ export const sectionGroups: SectionGroup[] = [
     kind: 'addon',
     title: 'Creativity',
     components: [
-      c('cre-ideas', 'Idea generation', 'planned'),
-      c('cre-cross', 'Cross-domain inspiration', 'planned'),
-      c('cre-out', 'Creative output tracking', 'planned'),
+      c('cre-ideas', 'Idea generation', 'in_progress', {
+        repo: 'giant-schrodinger',
+      }),
+      c('cre-cross', 'Cross-domain inspiration', 'in_progress', {
+        repo: 'v0-games-library',
+      }),
+      c('cre-out', 'Creative output tracking', 'implemented', {
+        repo: 'creative-hub',
+      }),
     ],
   },
   {
@@ -337,8 +443,14 @@ export const sectionGroups: SectionGroup[] = [
     title: 'Career',
     components: [
       c('car-gap', 'Skill gap analysis', 'planned'),
-      c('car-match', 'Opportunity matching', 'planned'),
-      c('car-resume', 'Resume + portfolio updates', 'planned'),
+      c('car-match', 'Opportunity matching', 'in_progress', {
+        repo: 'retail-roadshow-scraper',
+        notes: 'Deal / roadshow automation',
+      }),
+      c('car-resume', 'Resume + portfolio updates', 'implemented', {
+        repo: 'little-red-hen',
+        notes: 'Public venue / brand site',
+      }),
     ],
   },
   {
@@ -347,8 +459,12 @@ export const sectionGroups: SectionGroup[] = [
     title: 'Networking',
     components: [
       c('net-intel', 'Contact intelligence', 'planned'),
-      c('net-follow', 'Follow-up automation', 'planned'),
-      c('net-events', 'Event suggestions', 'planned'),
+      c('net-follow', 'Follow-up automation', 'implemented', {
+        repo: 'retail-roadshow-scraper',
+      }),
+      c('net-events', 'Event suggestions', 'in_progress', {
+        repo: 'pulse-app',
+      }),
     ],
   },
   {
@@ -356,8 +472,12 @@ export const sectionGroups: SectionGroup[] = [
     kind: 'addon',
     title: 'Lifestyle design',
     components: [
-      c('life-stack', 'Habit stacking', 'planned'),
-      c('life-balance', 'Life balance scoring', 'planned'),
+      c('life-stack', 'Habit stacking', 'in_progress', {
+        repo: '2026GoalTracker',
+      }),
+      c('life-balance', 'Life balance scoring', 'in_progress', {
+        repo: '2026GoalTracker',
+      }),
       c('life-time', 'Time allocation analysis', 'planned'),
     ],
   },
@@ -366,9 +486,17 @@ export const sectionGroups: SectionGroup[] = [
     kind: 'addon',
     title: 'Fun optimization',
     components: [
-      c('fun-score', '“Fun score” tracking', 'planned'),
-      c('fun-rec', 'Activity recommendations', 'planned'),
-      c('fun-balance', 'Social vs solo balance', 'planned'),
+      c('fun-score', '“Fun score” tracking', 'in_progress', {
+        repo: 'i-am-drunk',
+        notes: 'Yearly recap / stats',
+      }),
+      c('fun-rec', 'Activity recommendations', 'implemented', {
+        repo: 'VennWithFriendsDemo',
+        notes: 'Also v0-venn-with-friends',
+      }),
+      c('fun-balance', 'Social vs solo balance', 'in_progress', {
+        repo: 'MN-Fun-Squad-Hall-of-Fame',
+      }),
     ],
   },
   {
@@ -377,10 +505,17 @@ export const sectionGroups: SectionGroup[] = [
     title: 'Future expansion',
     description: 'Longer-horizon OS capabilities.',
     components: [
-      c('fu-agents', 'Multi-agent orchestration', 'planned'),
-      c('fu-auto', 'Fully automated routines', 'planned'),
+      c('fu-agents', 'Multi-agent orchestration', 'in_progress', {
+        repo: 'SiskelBot',
+      }),
+      c('fu-auto', 'Fully automated routines', 'in_progress', {
+        repo: 'openclaw',
+        notes: 'Fork: personal AI assistant stack',
+      }),
       c('fu-predict', 'Predictive life planning', 'planned'),
-      c('fu-goals', 'AI-assisted goal achievement', 'planned'),
+      c('fu-goals', 'AI-assisted goal achievement', 'in_progress', {
+        repo: '2026GoalTracker',
+      }),
     ],
   },
 ]

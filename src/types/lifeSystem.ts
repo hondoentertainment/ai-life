@@ -12,7 +12,14 @@ export interface ComponentItem {
   id: string
   label: string
   notes?: string
+  /** External product or vendor (e.g. Apple, Fitbod). */
   tool?: string
+  /** GitHub repo name under hondoentertainment (slug only). */
+  repo?: string
+  /** Full repo URL when not under the default GitHub org. */
+  repoUrl?: string
+  /** External link (e.g. prototype or doc) separate from repo. */
+  locationUrl?: string
   defaultStatus: ComponentStatus
 }
 
@@ -22,6 +29,12 @@ export interface SectionGroup {
   kind: SectionKind
   description?: string
   components: ComponentItem[]
+}
+
+/** Self-rated mastery per catalog category (section group), 0–100. */
+export interface CategorySelfMetrics {
+  proficiency?: number
+  percentComplete?: number
 }
 
 export interface IntegrationDef {
@@ -50,6 +63,16 @@ export const STATUS_LABELS: Record<ComponentStatus, string> = {
   in_progress: 'In progress',
   planned: 'Planned',
   not_started: 'Not started',
+}
+
+/** Short hints for tooltips and onboarding copy. */
+export const STATUS_DESCRIPTIONS: Record<ComponentStatus, string> = {
+  implemented: 'Built and in use in your life OS.',
+  external: 'Covered by an app or service you rely on.',
+  can_do: 'You could turn this on without major new build work.',
+  in_progress: 'Actively building or wiring this up.',
+  planned: 'On the roadmap; not active signal yet.',
+  not_started: 'No work or tool attached yet.',
 }
 
 export function statusWeight(s: ComponentStatus): number {
@@ -84,6 +107,19 @@ export function groupHasCoverage(
   overrides: Record<string, ComponentStatus | undefined>,
 ): boolean {
   return isActiveCoverage(bestGroupStatus(group, overrides))
+}
+
+/** Share of components in the group with active coverage status (0–100). */
+export function groupSignalPercent(
+  group: SectionGroup,
+  overrides: Record<string, ComponentStatus | undefined>,
+): number {
+  const total = group.components.length
+  if (total === 0) return 0
+  const active = group.components.filter((c) =>
+    isActiveCoverage(overrides[c.id] ?? c.defaultStatus),
+  ).length
+  return Math.round((active / total) * 100)
 }
 
 export function integrationSatisfied(
