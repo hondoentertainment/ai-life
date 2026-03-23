@@ -5,7 +5,9 @@ const c = (
   id: string,
   label: string,
   defaultStatus: ComponentItem['defaultStatus'],
-  extra?: Partial<Pick<ComponentItem, 'notes' | 'tool' | 'repo'>>,
+  extra?: Partial<
+    Pick<ComponentItem, 'notes' | 'tool' | 'repo' | 'repoUrl' | 'locationUrl'>
+  >,
 ): ComponentItem => ({
   id,
   label,
@@ -415,6 +417,8 @@ export const sectionGroups: SectionGroup[] = [
       }),
       c('prod-todo', 'Context-aware to-do lists', 'implemented', {
         repo: '2026GoalTracker',
+        locationUrl: 'https://morning-groove-log.lovable.app',
+        notes: 'Morning Groove — daily habit / goals surface on Lovable.',
       }),
       c('prod-focus', 'Focus tracking', 'in_progress', {
         repo: 'central-command',
@@ -474,6 +478,8 @@ export const sectionGroups: SectionGroup[] = [
     components: [
       c('life-stack', 'Habit stacking', 'in_progress', {
         repo: '2026GoalTracker',
+        locationUrl: 'https://morning-groove-log.lovable.app',
+        notes: 'Morning Groove for daily check-ins.',
       }),
       c('life-balance', 'Life balance scoring', 'in_progress', {
         repo: '2026GoalTracker',
