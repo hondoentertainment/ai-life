@@ -9,6 +9,21 @@
       content="Track AI Life OS sections, component status, and integration spine coverage."
     />
     <title>AI Life Coverage</title>
+    <script>
+      (function () {
+        try {
+          var k = 'ai-life-theme-pref'
+          var p = localStorage.getItem(k)
+          function resolve(v) {
+            if (v === 'light' || v === 'dark') return v
+            return window.matchMedia('(prefers-color-scheme: light)').matches
+              ? 'light'
+              : 'dark'
+          }
+          document.documentElement.setAttribute('data-theme', resolve(p))
+        } catch (e) {}
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

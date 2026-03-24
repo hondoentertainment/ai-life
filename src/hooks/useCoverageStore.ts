@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { CategorySelfMetrics, ComponentStatus } from '../types/lifeSystem'
+import { COVERAGE_STORAGE_KEY_V2 } from '../lib/storageKeys'
 
 const STORAGE_KEY_V1 = 'ai-life-coverage-v1'
-const STORAGE_KEY_V2 = 'ai-life-coverage-v2'
+const STORAGE_KEY_V2 = COVERAGE_STORAGE_KEY_V2
 
 const STATUS_VALUES = new Set<string>([
   'implemented',
@@ -157,6 +158,17 @@ export function useCoverageStore() {
     setCategoryMetrics({})
   }, [])
 
+  const importBackup = useCallback(
+    (data: {
+      overrides: Record<string, ComponentStatus>
+      categoryMetrics: Record<string, CategorySelfMetrics>
+    }) => {
+      setOverrides(data.overrides)
+      setCategoryMetrics(data.categoryMetrics)
+    },
+    [],
+  )
+
   return {
     overrides,
     categoryMetrics,
@@ -164,5 +176,6 @@ export function useCoverageStore() {
     clearOverride,
     setCategoryMetric,
     resetAll,
+    importBackup,
   }
 }

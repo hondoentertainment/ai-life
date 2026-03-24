@@ -1,10 +1,37 @@
-import { useCallback, useMemo, useState, type KeyboardEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type KeyboardEvent,
+} from 'react'
 import {
   groupsById,
   integrations,
   sectionGroups,
 } from './data/registry'
+import { getCatalogCsvFreshnessLabel } from './data/catalogFreshness'
+import { projectsCatalog } from './data/projectsCatalog'
 import { useCoverageStore } from './hooks/useCoverageStore'
+import {
+  useThemePreference,
+  type ThemePref,
+} from './hooks/useThemePreference'
+import type { ParsedBackup } from './lib/coverageBackup'
+import {
+  parseCoverageBackupJson,
+  sanitizeImportedMetrics,
+  sanitizeImportedOverrides,
+} from './lib/coverageBackup'
+import { IMPORT_UNDO_SESSION_KEY } from './lib/storageKeys'
+import type { ImportMergeMode } from './lib/importMerge'
+import {
+  csvProjectLooksShipped,
+  getCatalogProjectWebLinks,
+} from './lib/csvShipped'
+import type { CatalogProject } from './types/projectCatalog'
 import type {
   CategorySelfMetrics,
   ComponentItem,
@@ -22,9 +49,18 @@ import {
   isActiveCoverage,
   statusWeight,
 } from './types/lifeSystem'
+import { ImportBackupDialog } from './components/ImportBackupDialog'
+import { applyImportMergePlan } from './lib/importMerge'
+import { APP_VERSION, SCHEMA_VERSION } from './version'
 import './App.css'
 
-type Tab = 'overview' | 'mastery' | 'sections' | 'integrations' | 'gaps'
+type Tab =
+  | 'overview'
+  | 'showcase'
+  | 'mastery'
+  | 'sections'
+  | 'integrations'
+  | 'gaps'
 
 const KIND_SORT: SectionKind[] = ['layer', 'domain', 'addon', 'future']
 
@@ -34,6 +70,12 @@ const TABS: { id: Tab; label: string; description: string }[] = [
     label: 'Overview',
     description:
       'High-level counts, status mix, and whether your four spine integrations are fed.',
+  },
+  {
+    id: 'showcase',
+    label: 'Showcase',
+    description:
+      'What already meets the objectives: spine integrations, category signal, shipped CSV projects, strong self-ratings.',
   },
   {
     id: 'mastery',
@@ -61,6 +103,8 @@ const TABS: { id: Tab; label: string; description: string }[] = [
   },
 ]
 
+const TAB_META_BY_ID = new Map(TABS.map((t) => [t.id, t]))
+
 const KIND_CLASS: Record<SectionGroup['kind'], string> = {
   layer: 'kind-layer',
   domain: 'kind-domain',
@@ -81,6 +125,52 @@ const GITHUB_USER = 'hondoentertainment'
 
 function githubRepoHref(repo: string): string {
   return `https://github.com/${GITHUB_USER}/${encodeURIComponent(repo)}`
+}
+
+const SHOWCASE_SELF_RATED_MIN = 70
+
+/** Preset: only the CSV-backed project group. */
+const KIND_FILTER_CSV_ONLY = '__csv__'
+
+const CSV_SECTION_PREVIEW_ROWS = 30
+
+const TAB_ORDER: Tab[] = [
+  'overview',
+  'sections',
+  'mastery',
+  'showcase',
+  'integrations',
+  'gaps',
+]
+
+const NAV_GROUPS: { label: string; tabs: Tab[] }[] = [
+  { label: 'Track', tabs: ['overview', 'sections', 'mastery'] },
+  { label: 'Analyze', tabs: ['showcase', 'integrations', 'gaps'] },
+]
+
+function SignalVsSelfRatedHint({ id }: { id?: string }) {
+  const sid = id ?? 'signal-self-hint'
+  return (
+    <details className="ux-hint-details">
+      <summary className="ux-hint-summary" id={sid}>
+        What’s the difference between signal and my ratings?
+      </summary>
+      <div className="ux-hint-body">
+        <p>
+          <strong>Signal %</strong> is computed from your{' '}
+          <strong>Sections</strong> data: the share of components in that
+          category marked Implemented, External, Can do, or In progress. It
+          reflects registered coverage, not how you feel about the area.
+        </p>
+        <p>
+          <strong>Proficiency</strong> and <strong>your % complete</strong> on
+          the <strong>Mastery</strong> tab are self-ratings (0–100) stored only
+          in this browser. Use them for intent and momentum; they do not change
+          signal.
+        </p>
+      </div>
+    </details>
+  )
 }
 
 function useStats(overrides: Record<string, ComponentStatus | undefined>) {
@@ -122,6 +212,70 @@ function weakGroups(
   )
 }
 
+type IntegrationFocusHint = {
+  integrationTitle: string
+  message: string
+}
+
+function getFirstBlockedIntegrationFocus(
+  overrides: Record<string, ComponentStatus | undefined>,
+): IntegrationFocusHint | null {
+  const blocked = integrations.filter(
+    (i) => !integrationSatisfied(i, groupsById, overrides),
+  )
+  const i = blocked[0]
+  if (!i) return null
+  for (const gid of i.requiredGroupIds) {
+    const g = groupsById.get(gid)
+    if (!g || !groupHasCoverage(g, overrides)) {
+      return {
+        integrationTitle: i.title,
+        message: `No active coverage in “${g?.title ?? gid}” (required).`,
+      }
+    }
+  }
+  if (i.requiredOneOfGroups) {
+    for (const orSet of i.requiredOneOfGroups) {
+      const ok = orSet.some((gid) => {
+        const g = groupsById.get(gid)
+        return g ? groupHasCoverage(g, overrides) : false
+      })
+      if (!ok) {
+        const labels = orSet
+          .map((gid) => groupsById.get(gid)?.title ?? gid)
+          .join(', ')
+        return {
+          integrationTitle: i.title,
+          message: `Need active coverage in at least one of: ${labels}.`,
+        }
+      }
+    }
+  }
+  return null
+}
+
+function readTabFromUrl(): Tab {
+  if (typeof window === 'undefined') return 'overview'
+  try {
+    const q = new URLSearchParams(window.location.search).get('tab')
+    if (q && TAB_META_BY_ID.has(q as Tab)) return q as Tab
+  } catch {
+    /* ignore */
+  }
+  return 'overview'
+}
+
+function syncTabToUrl(t: Tab) {
+  const url = new URL(window.location.href)
+  if (t === 'overview') url.searchParams.delete('tab')
+  else url.searchParams.set('tab', t)
+  const qs = url.searchParams.toString()
+  const next =
+    url.pathname + (qs ? `?${qs}` : '') + (url.hash || '')
+  const cur = window.location.pathname + window.location.search + window.location.hash
+  if (next !== cur) window.history.replaceState(null, '', next)
+}
+
 function countActiveComponentsInGroup(
   g: SectionGroup,
   overrides: Record<string, ComponentStatus | undefined>,
@@ -145,7 +299,7 @@ function statusToneClass(s: ComponentStatus): string {
 }
 
 function App() {
-  const [tab, setTab] = useState<Tab>('overview')
+  const [tab, setTabState] = useState<Tab>(() => readTabFromUrl())
   const [kindFilter, setKindFilter] = useState<string>('all')
   const [search, setSearch] = useState('')
   const {
@@ -155,11 +309,154 @@ function App() {
     clearOverride,
     setCategoryMetric,
     resetAll,
+    importBackup,
   } = useCoverageStore()
+  const { pref: themePref, setPref: setThemePref } = useThemePreference()
+  const importInputRef = useRef<HTMLInputElement>(null)
+  const importJsonButtonRef = useRef<HTMLButtonElement>(null)
+  const [importNotice, setImportNotice] = useState<string | null>(null)
+  const [pendingImport, setPendingImport] = useState<ParsedBackup | null>(null)
+  const [hasImportUndo, setHasImportUndo] = useState(() => {
+    try {
+      return !!sessionStorage.getItem(IMPORT_UNDO_SESSION_KEY)
+    } catch {
+      return false
+    }
+  })
   const stats = useStats(overrides)
 
-  const tabIds = TABS.map((t) => t.id)
-  const activeTabMeta = TABS.find((t) => t.id === tab)!
+  const setTab = useCallback((t: Tab) => {
+    setTabState(t)
+  }, [])
+
+  useEffect(() => {
+    syncTabToUrl(tab)
+  }, [tab])
+
+  useEffect(() => {
+    const onPop = () => setTabState(readTabFromUrl())
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+
+  const onImportFile = useCallback(
+    (e: ChangeEvent<HTMLInputElement>) => {
+      const f = e.target.files?.[0]
+      e.target.value = ''
+      if (!f) return
+      const reader = new FileReader()
+      reader.onload = () => {
+        const text = typeof reader.result === 'string' ? reader.result : ''
+        const parsed = parseCoverageBackupJson(text)
+        if (!parsed.ok) {
+          setImportNotice(`Import failed: ${parsed.error}`)
+          window.setTimeout(() => setImportNotice(null), 7000)
+          return
+        }
+        setPendingImport(parsed.data)
+      }
+      reader.onerror = () => {
+        setImportNotice('Could not read that file.')
+        window.setTimeout(() => setImportNotice(null), 5000)
+      }
+      reader.readAsText(f)
+    },
+    [],
+  )
+
+  const confirmImport = useCallback(
+    (mode: ImportMergeMode) => {
+      if (!pendingImport) return
+      const snap = pendingImport
+      try {
+        sessionStorage.setItem(
+          IMPORT_UNDO_SESSION_KEY,
+          JSON.stringify({ overrides, categoryMetrics }),
+        )
+        setHasImportUndo(true)
+      } catch {
+        /* ignore quota / private mode */
+      }
+      const next = applyImportMergePlan(
+        mode,
+        { overrides, categoryMetrics },
+        {
+          overrides: snap.overrides,
+          categoryMetrics: snap.categoryMetrics,
+        },
+      )
+      importBackup(next)
+      setPendingImport(null)
+      const extra = snap.exportedAt ? ` (${snap.exportedAt})` : ''
+      setImportNotice(`Imported backup${extra}.`)
+      window.setTimeout(() => setImportNotice(null), 5000)
+    },
+    [pendingImport, overrides, categoryMetrics, importBackup],
+  )
+
+  const undoLastImport = useCallback(() => {
+    try {
+      const raw = sessionStorage.getItem(IMPORT_UNDO_SESSION_KEY)
+      if (!raw) {
+        setHasImportUndo(false)
+        return
+      }
+      const parsed = JSON.parse(raw) as Record<string, unknown>
+      importBackup({
+        overrides: sanitizeImportedOverrides(parsed.overrides),
+        categoryMetrics: sanitizeImportedMetrics(parsed.categoryMetrics),
+      })
+      sessionStorage.removeItem(IMPORT_UNDO_SESSION_KEY)
+      setHasImportUndo(false)
+      setImportNotice('Restored state before last import.')
+      window.setTimeout(() => setImportNotice(null), 5000)
+    } catch {
+      setImportNotice('Could not undo import.')
+      window.setTimeout(() => setImportNotice(null), 5000)
+    }
+  }, [importBackup])
+
+  const integrationFocus = useMemo(
+    () => getFirstBlockedIntegrationFocus(overrides),
+    [overrides],
+  )
+  const catalogFreshnessLabel = useMemo(
+    () => getCatalogCsvFreshnessLabel(),
+    [],
+  )
+
+  const tabIds = TAB_ORDER
+  const activeTabMeta = TAB_META_BY_ID.get(tab)!
+
+  const [saveNotice, setSaveNotice] = useState<string | null>(null)
+  const [exportNotice, setExportNotice] = useState<string | null>(null)
+  const [copyToast, setCopyToast] = useState<{
+    text: string
+    seq: number
+  } | null>(null)
+  const saveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const saveEffectSkipRef = useRef(true)
+
+  useEffect(() => {
+    if (saveEffectSkipRef.current) {
+      saveEffectSkipRef.current = false
+      return
+    }
+    if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current)
+    saveDebounceRef.current = setTimeout(() => {
+      setSaveNotice('Saved in this browser (statuses & mastery).')
+      saveDebounceRef.current = null
+    }, 450)
+    return () => {
+      if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current)
+    }
+  }, [overrides, categoryMetrics])
+
+  useEffect(() => {
+    if (!copyToast) return
+    const id = window.setTimeout(() => setCopyToast(null), 2000)
+    return () => window.clearTimeout(id)
+  }, [copyToast])
 
   const onTabKeyDown = useCallback(
     (e: KeyboardEvent<HTMLButtonElement>) => {
@@ -179,13 +476,17 @@ function App() {
         setTab(tabIds[tabIds.length - 1])
       }
     },
-    [tab, tabIds],
+    [tab, tabIds, setTab],
   )
 
   const filteredGroups = useMemo(() => {
     const q = search.trim().toLowerCase()
     return sectionGroups.filter((g) => {
-      if (kindFilter !== 'all' && g.kind !== kindFilter) return false
+      if (kindFilter === KIND_FILTER_CSV_ONLY) {
+        if (g.id !== 'csv-projects') return false
+      } else if (kindFilter !== 'all' && g.kind !== kindFilter) {
+        return false
+      }
       if (!q) return true
       if (g.title.toLowerCase().includes(q)) return true
       return g.components.some((c) => {
@@ -203,6 +504,8 @@ function App() {
   const exportJson = () => {
     const payload = {
       exportedAt: new Date().toISOString(),
+      schemaVersion: SCHEMA_VERSION,
+      appVersion: APP_VERSION,
       overrides,
       categoryMetrics,
       registryVersion: 3,
@@ -215,12 +518,45 @@ function App() {
     a.download = 'ai-life-coverage.json'
     a.click()
     URL.revokeObjectURL(a.href)
+    setExportNotice('Export started — check your downloads for ai-life-coverage.json.')
+    window.setTimeout(() => setExportNotice(null), 5000)
   }
 
   const blockedCount =
     integrations.length -
     integrations.filter((i) => integrationSatisfied(i, groupsById, overrides))
       .length
+
+  const headerBanner = useMemo(() => {
+    if (importNotice) {
+      const err =
+        importNotice.startsWith('Import failed') ||
+        importNotice.startsWith('Could not read')
+      return {
+        text: importNotice,
+        tone: err ? ('error' as const) : ('success' as const),
+      }
+    }
+    if (exportNotice) return { text: exportNotice, tone: 'info' as const }
+    if (saveNotice) return { text: saveNotice, tone: 'info' as const }
+    return null
+  }, [importNotice, exportNotice, saveNotice])
+
+  const copyTabLink = useCallback(async () => {
+    try {
+      const url = new URL(window.location.href)
+      if (tab === 'overview') url.searchParams.delete('tab')
+      else url.searchParams.set('tab', tab)
+      await navigator.clipboard.writeText(url.toString())
+      setCopyToast((prev) => ({
+        text: 'Tab link copied to clipboard.',
+        seq: (prev?.seq ?? 0) + 1,
+      }))
+    } catch {
+      setImportNotice('Could not copy link (clipboard blocked).')
+      window.setTimeout(() => setImportNotice(null), 5000)
+    }
+  }, [tab])
 
   return (
     <div className="app">
@@ -240,6 +576,65 @@ function App() {
             </p>
           </div>
           <div className="header-actions">
+            {headerBanner ? (
+              <p
+                className={`header-status header-status-${headerBanner.tone}`}
+                role="status"
+                aria-live={headerBanner.tone === 'error' ? 'assertive' : 'polite'}
+                aria-atomic="true"
+              >
+                {headerBanner.text}
+              </p>
+            ) : null}
+            <label className="field field-inline theme-field">
+              <span className="field-label visually-hidden">Theme</span>
+              <select
+                value={themePref}
+                onChange={(e) =>
+                  setThemePref(e.target.value as ThemePref)
+                }
+                aria-label="Color theme"
+              >
+                <option value="system">System theme</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </label>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept="application/json,.json"
+              className="visually-hidden"
+              tabIndex={-1}
+              onChange={onImportFile}
+              aria-hidden="true"
+            />
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={copyTabLink}
+              title="Copy URL including the current tab (?tab=…)"
+            >
+              Copy tab link
+            </button>
+            {hasImportUndo ? (
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={undoLastImport}
+              >
+                Undo last import
+              </button>
+            ) : null}
+            <button
+              ref={importJsonButtonRef}
+              type="button"
+              className="btn btn-ghost"
+              data-testid="import-json-button"
+              onClick={() => importInputRef.current?.click()}
+            >
+              Import JSON
+            </button>
             <button type="button" className="btn btn-ghost" onClick={exportJson}>
               Export JSON
             </button>
@@ -265,27 +660,38 @@ function App() {
             </span>
           </div>
         </div>
-        <nav
-          className="nav-tabs"
-          role="tablist"
-          aria-label="Primary views"
-        >
-          {TABS.map(({ id, label }) => (
-            <button
-              key={id}
-              type="button"
-              role="tab"
-              id={`tab-${id}`}
-              aria-selected={tab === id}
-              aria-controls="main-content"
-              tabIndex={tab === id ? 0 : -1}
-              onClick={() => setTab(id)}
-              onKeyDown={onTabKeyDown}
-            >
-              {label}
-            </button>
+        <div className="nav-tabs-wrap">
+          {NAV_GROUPS.map((row) => (
+            <div key={row.label} className="nav-tabs-row">
+              <span className="nav-tabs-group-label">{row.label}</span>
+              <div
+                className="nav-tabs-scroll"
+                role="tablist"
+                aria-label={`${row.label} views`}
+                aria-orientation="horizontal"
+              >
+                {row.tabs.map((id) => {
+                  const meta = TAB_META_BY_ID.get(id)!
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      role="tab"
+                      id={`tab-${id}`}
+                      aria-selected={tab === id}
+                      aria-controls="main-content"
+                      tabIndex={tab === id ? 0 : -1}
+                      onClick={() => setTab(id)}
+                      onKeyDown={onTabKeyDown}
+                    >
+                      {meta.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
           ))}
-        </nav>
+        </div>
         <p className="tab-context" role="status" aria-live="polite">
           {activeTabMeta.description}
         </p>
@@ -303,9 +709,26 @@ function App() {
             overrides={overrides}
             categoryMetrics={categoryMetrics}
             blockedCount={blockedCount}
+            catalogFreshnessLabel={catalogFreshnessLabel}
+            integrationFocus={integrationFocus}
             onGoIntegrations={() => setTab('integrations')}
             onGoGaps={() => setTab('gaps')}
             onGoSections={() => setTab('sections')}
+            onGoMastery={() => setTab('mastery')}
+            onGoShowcase={() => setTab('showcase')}
+            onGoSectionsCsv={() => {
+              setKindFilter(KIND_FILTER_CSV_ONLY)
+              setSearch('')
+              setTab('sections')
+            }}
+          />
+        )}
+        {tab === 'showcase' && (
+          <ShowcasePanel
+            overrides={overrides}
+            categoryMetrics={categoryMetrics}
+            onGoSections={() => setTab('sections')}
+            onGoIntegrations={() => setTab('integrations')}
             onGoMastery={() => setTab('mastery')}
           />
         )}
@@ -327,6 +750,7 @@ function App() {
             setKindFilter={setKindFilter}
             search={search}
             setSearch={setSearch}
+            catalogFreshnessLabel={catalogFreshnessLabel}
           />
         )}
         {tab === 'integrations' && (
@@ -340,7 +764,304 @@ function App() {
           />
         )}
       </main>
+
+      {pendingImport ? (
+        <ImportBackupDialog
+          backup={pendingImport}
+          currentOverrides={overrides}
+          currentCategoryMetrics={categoryMetrics}
+          returnFocusRef={importJsonButtonRef}
+          onDismiss={() => setPendingImport(null)}
+          onApply={confirmImport}
+        />
+      ) : null}
+
+      {copyToast ? (
+        <div
+          className="copy-toast"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          {copyToast.text}
+        </div>
+      ) : null}
     </div>
+  )
+}
+
+function ShowcasePanel({
+  overrides,
+  categoryMetrics,
+  onGoSections,
+  onGoIntegrations,
+  onGoMastery,
+}: {
+  overrides: Record<string, ComponentStatus | undefined>
+  categoryMetrics: Record<string, CategorySelfMetrics>
+  onGoSections: () => void
+  onGoIntegrations: () => void
+  onGoMastery: () => void
+}) {
+  const [categoryShowMode, setCategoryShowMode] = useState<'all' | 'top5'>(
+    'all',
+  )
+
+  const satisfiedIntegrations = useMemo(
+    () =>
+      integrations.filter((i) =>
+        integrationSatisfied(i, groupsById, overrides),
+      ),
+    [overrides],
+  )
+
+  const categoriesWithSignal = useMemo(() => {
+    return sectionGroups
+      .filter((g) => g.kind !== 'future' && groupHasCoverage(g, overrides))
+      .map((g) => ({
+        group: g,
+        signal: groupSignalPercent(g, overrides),
+        best: bestGroupStatus(g, overrides),
+      }))
+      .sort((a, b) => b.signal - a.signal)
+  }, [overrides])
+
+  const csvShippedActive = useMemo(
+    () => projectsCatalog.filter((p) => csvProjectLooksShipped(p)),
+    [],
+  )
+
+  const selfRatedStrong = useMemo(() => {
+    const rows: {
+      group: SectionGroup
+      proficiency: number
+      percentComplete: number
+    }[] = []
+    for (const g of sectionGroups) {
+      const m = categoryMetrics[g.id]
+      if (!m) continue
+      const prof = m.proficiency
+      const comp = m.percentComplete
+      if (typeof prof !== 'number' || typeof comp !== 'number') continue
+      if (prof < SHOWCASE_SELF_RATED_MIN || comp < SHOWCASE_SELF_RATED_MIN)
+        continue
+      rows.push({ group: g, proficiency: prof, percentComplete: comp })
+    }
+    rows.sort((a, b) => {
+      const sa = a.proficiency + a.percentComplete
+      const sb = b.proficiency + b.percentComplete
+      return sb - sa
+    })
+    return rows
+  }, [categoryMetrics])
+
+  const categoriesDisplayed =
+    categoryShowMode === 'top5'
+      ? categoriesWithSignal.slice(0, 5)
+      : categoriesWithSignal
+
+  return (
+    <div className="panel showcase-panel">
+      <h2 className="panel-heading">Meeting the objectives</h2>
+      <p className="panel-lead muted">
+        Highlights driven by your current statuses in{' '}
+        <button type="button" className="link-btn" onClick={onGoSections}>
+          Sections
+        </button>
+        , the integration spine, your CSV catalog, and (optionally){' '}
+        <button type="button" className="link-btn" onClick={onGoMastery}>
+          Mastery
+        </button>{' '}
+        self-ratings (≥{SHOWCASE_SELF_RATED_MIN}% on both proficiency and %
+        complete).
+      </p>
+      <SignalVsSelfRatedHint id="showcase-signal-hint" />
+
+      <section className="showcase-block" aria-labelledby="showcase-spine">
+        <h3 className="showcase-block-title" id="showcase-spine">
+          Spine integrations satisfied
+        </h3>
+        <p className="panel-lead muted showcase-block-lead">
+          Objectives met when every required category has active coverage (same
+          rules as the Integrations tab).
+        </p>
+        {satisfiedIntegrations.length === 0 ? (
+          <p className="empty-hint empty-block">
+            None fully satisfied yet —{' '}
+            <button type="button" className="link-btn" onClick={onGoIntegrations}>
+              open Integrations
+            </button>{' '}
+            to see what is blocking.
+          </p>
+        ) : (
+          <ul className="showcase-card-list">
+            {satisfiedIntegrations.map((i) => (
+              <li key={i.id}>
+                <article className="integration-card ok showcase-card">
+                  <div>
+                    <strong>{i.title}</strong>
+                    <p>{i.description}</p>
+                  </div>
+                  <span className="badge badge-ok">Objective met</span>
+                </article>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="showcase-block" aria-labelledby="showcase-signal">
+        <h3 className="showcase-block-title" id="showcase-signal">
+          Catalog categories with active signal
+        </h3>
+        <p className="panel-lead muted showcase-block-lead">
+          Non-future section groups where at least one component has active
+          coverage (excluding Planned / Not started only).{' '}
+          <strong>{categoriesWithSignal.length}</strong> total
+          {categoryShowMode === 'top5' && categoriesWithSignal.length > 5
+            ? ` · showing top 5 by signal`
+            : ''}
+          .
+        </p>
+        {categoriesWithSignal.length > 5 ? (
+          <div className="showcase-mode-toggle" role="group" aria-label="Category list length">
+            <button
+              type="button"
+              className={`btn btn-sm ${categoryShowMode === 'top5' ? '' : 'btn-ghost'}`}
+              onClick={() => setCategoryShowMode('top5')}
+              aria-pressed={categoryShowMode === 'top5'}
+            >
+              Top 5 by signal
+            </button>
+            <button
+              type="button"
+              className={`btn btn-sm ${categoryShowMode === 'all' ? '' : 'btn-ghost'}`}
+              onClick={() => setCategoryShowMode('all')}
+              aria-pressed={categoryShowMode === 'all'}
+            >
+              Show all ({categoriesWithSignal.length})
+            </button>
+          </div>
+        ) : null}
+        {categoriesWithSignal.length === 0 ? (
+          <p className="empty-hint empty-block">
+            No categories with signal yet — adjust statuses in Sections.
+          </p>
+        ) : (
+          <ul className="showcase-category-list">
+            {categoriesDisplayed.map(({ group, signal, best }) => (
+              <li key={group.id} className="showcase-category-row">
+                <div className="showcase-category-main">
+                  <span className="showcase-category-title">{group.title}</span>
+                  <span className={`kind-pill ${KIND_CLASS[group.kind]}`}>
+                    {KIND_LABEL[group.kind]}
+                  </span>
+                </div>
+                <div className="showcase-category-meta">
+                  <span
+                    className="showcase-signal-badge"
+                    title="Active components ÷ total in group"
+                  >
+                    {signal}% signal
+                  </span>
+                  <span className="showcase-best-status">
+                    Best: {STATUS_LABELS[best]}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="showcase-block" aria-labelledby="showcase-csv">
+        <h3 className="showcase-block-title" id="showcase-csv">
+          Active CSV projects (shipped / linkable)
+        </h3>
+        <p className="panel-lead muted showcase-block-lead">
+          Rows in <code className="inline-code">projects-2026-03-23.csv</code>{' '}
+          marked <strong>active</strong> with an <code className="inline-code">http(s)</code>{' '}
+          repository or location URL, a GitHub repo URL, or a bare{' '}
+          <code className="inline-code">owner/repo</code> in the repository field.
+        </p>
+        {csvShippedActive.length === 0 ? (
+          <p className="empty-hint empty-block">
+            No active projects match the shipped / linkable rules yet.
+          </p>
+        ) : (
+          <ul className="showcase-project-list">
+            {csvShippedActive.map((p) => (
+              <ShowcaseCsvProject key={p.id} p={p} />
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="showcase-block" aria-labelledby="showcase-self">
+        <h3 className="showcase-block-title" id="showcase-self">
+          Self-rated mastery on track
+        </h3>
+        <p className="panel-lead muted showcase-block-lead">
+          Categories where you rated both proficiency and % complete at or
+          above {SHOWCASE_SELF_RATED_MIN}%.
+        </p>
+        {selfRatedStrong.length === 0 ? (
+          <p className="empty-hint empty-block">
+            None yet — add scores on the Mastery tab.
+          </p>
+        ) : (
+          <ul className="showcase-mastery-list">
+            {selfRatedStrong.map(({ group, proficiency, percentComplete }) => (
+              <li key={group.id} className="showcase-mastery-row">
+                <span className="showcase-mastery-name">{group.title}</span>
+                <span className="showcase-mastery-vals">
+                  {proficiency}% prof · {percentComplete}% complete
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  )
+}
+
+function ShowcaseCsvProject({ p }: { p: CatalogProject }) {
+  const links = getCatalogProjectWebLinks(p)
+  return (
+    <li className="showcase-project-card">
+      <div className="showcase-project-head">
+        <strong className="showcase-project-name">{p.name}</strong>
+        {p.location.trim() ? (
+          <span className="showcase-project-bucket">{p.location.trim()}</span>
+        ) : null}
+      </div>
+      {p.description.trim() ? (
+        <p className="showcase-project-desc">{p.description.trim()}</p>
+      ) : null}
+      <div className="showcase-project-links">
+        {links.repository ? (
+          <a
+            className="inline-link"
+            href={links.repository.href}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Repository
+          </a>
+        ) : null}
+        {links.location ? (
+          <a
+            className="inline-link"
+            href={links.location.href}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Live / location
+          </a>
+        ) : null}
+      </div>
+    </li>
   )
 }
 
@@ -416,6 +1137,7 @@ function MasteryPanel({
         unset. <strong>Signal %</strong> is computed from how many components
         in that group have active coverage in Sections.
       </p>
+      <SignalVsSelfRatedHint id="mastery-signal-hint" />
 
       <div className="toolbar toolbar-wrap">
         <label className="field">
@@ -483,63 +1205,143 @@ function MasteryPanel({
                         {KIND_LABEL[g.kind]}
                       </span>
                     </td>
-                    <td className="mastery-input-cell">
+                    <td className="mastery-input-cell mastery-metric-cell">
+                      <label
+                        className="mastery-visible-label"
+                        htmlFor={`m-prof-${g.id}`}
+                      >
+                        Proficiency (0–100)
+                      </label>
                       <input
-                        type="number"
-                        className="mastery-num"
+                        type="range"
+                        id={`m-prof-${g.id}`}
+                        className="mastery-range"
                         min={0}
                         max={100}
-                        step={1}
-                        value={m.proficiency ?? ''}
+                        value={m.proficiency ?? 0}
                         onChange={(e) => {
-                          const t = e.target.value.trim()
-                          if (t === '') {
-                            setCategoryMetric(g.id, 'proficiency', undefined)
-                            return
-                          }
-                          const n = Number.parseInt(t, 10)
-                          if (Number.isNaN(n)) return
                           setCategoryMetric(
                             g.id,
                             'proficiency',
-                            clampPctInput(n),
+                            clampPctInput(Number(e.target.value)),
                           )
                         }}
-                        aria-label={`Proficiency percent for ${g.title}`}
-                        placeholder="—"
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={m.proficiency ?? 0}
+                        aria-valuetext={`${m.proficiency ?? 0} percent proficiency`}
                       />
-                      <span className="mastery-unit">%</span>
-                    </td>
-                    <td className="mastery-input-cell">
-                      <input
-                        type="number"
-                        className="mastery-num"
-                        min={0}
-                        max={100}
-                        step={1}
-                        value={m.percentComplete ?? ''}
-                        onChange={(e) => {
-                          const t = e.target.value.trim()
-                          if (t === '') {
+                      <div className="mastery-num-row">
+                        <input
+                          type="number"
+                          className="mastery-num"
+                          min={0}
+                          max={100}
+                          step={1}
+                          value={m.proficiency ?? ''}
+                          onChange={(e) => {
+                            const t = e.target.value.trim()
+                            if (t === '') {
+                              setCategoryMetric(g.id, 'proficiency', undefined)
+                              return
+                            }
+                            const n = Number.parseInt(t, 10)
+                            if (Number.isNaN(n)) return
                             setCategoryMetric(
                               g.id,
-                              'percentComplete',
-                              undefined,
+                              'proficiency',
+                              clampPctInput(n),
                             )
-                            return
-                          }
-                          const n = Number.parseInt(t, 10)
-                          if (Number.isNaN(n)) return
+                          }}
+                          aria-label={`Proficiency number for ${g.title}`}
+                          placeholder="—"
+                        />
+                        <span className="mastery-unit">%</span>
+                        {m.proficiency !== undefined ? (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-xs mastery-clear"
+                            onClick={() =>
+                              setCategoryMetric(g.id, 'proficiency', undefined)
+                            }
+                          >
+                            Clear
+                          </button>
+                        ) : null}
+                      </div>
+                    </td>
+                    <td className="mastery-input-cell mastery-metric-cell">
+                      <label
+                        className="mastery-visible-label"
+                        htmlFor={`m-comp-${g.id}`}
+                      >
+                        Your % complete (0–100)
+                      </label>
+                      <input
+                        type="range"
+                        id={`m-comp-${g.id}`}
+                        className="mastery-range"
+                        min={0}
+                        max={100}
+                        value={m.percentComplete ?? 0}
+                        onChange={(e) => {
                           setCategoryMetric(
                             g.id,
                             'percentComplete',
-                            clampPctInput(n),
+                            clampPctInput(Number(e.target.value)),
                           )
                         }}
-                        aria-label={`Percent complete for ${g.title}`}
-                        placeholder="—"
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={m.percentComplete ?? 0}
+                        aria-valuetext={`${m.percentComplete ?? 0} percent complete`}
                       />
-                      <span className="mastery-unit">%</span>
+                      <div className="mastery-num-row">
+                        <input
+                          type="number"
+                          className="mastery-num"
+                          min={0}
+                          max={100}
+                          step={1}
+                          value={m.percentComplete ?? ''}
+                          onChange={(e) => {
+                            const t = e.target.value.trim()
+                            if (t === '') {
+                              setCategoryMetric(
+                                g.id,
+                                'percentComplete',
+                                undefined,
+                              )
+                              return
+                            }
+                            const n = Number.parseInt(t, 10)
+                            if (Number.isNaN(n)) return
+                            setCategoryMetric(
+                              g.id,
+                              'percentComplete',
+                              clampPctInput(n),
+                            )
+                          }}
+                          aria-label={`Percent complete number for ${g.title}`}
+                          placeholder="—"
+                        />
+                        <span className="mastery-unit">%</span>
+                        {m.percentComplete !== undefined ? (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-xs mastery-clear"
+                            onClick={() =>
+                              setCategoryMetric(
+                                g.id,
+                                'percentComplete',
+                                undefined,
+                              )
+                            }
+                          >
+                            Clear
+                          </button>
+                        ) : null}
+                      </div>
                     </td>
                     <td className="mastery-signal-cell">
                       <div className="mastery-signal-row">
@@ -575,20 +1377,49 @@ function OverviewPanel({
   overrides,
   categoryMetrics,
   blockedCount,
+  catalogFreshnessLabel,
+  integrationFocus,
   onGoIntegrations,
   onGoGaps,
   onGoSections,
   onGoMastery,
+  onGoShowcase,
+  onGoSectionsCsv,
 }: {
   stats: ReturnType<typeof useStats>
   overrides: Record<string, ComponentStatus | undefined>
   categoryMetrics: Record<string, CategorySelfMetrics>
   blockedCount: number
+  catalogFreshnessLabel: string | null
+  integrationFocus: IntegrationFocusHint | null
   onGoIntegrations: () => void
   onGoGaps: () => void
   onGoSections: () => void
   onGoMastery: () => void
+  onGoShowcase: () => void
+  onGoSectionsCsv: () => void
 }) {
+  const spineMetCount = useMemo(
+    () =>
+      integrations.filter((i) =>
+        integrationSatisfied(i, groupsById, overrides),
+      ).length,
+    [overrides],
+  )
+
+  const categoriesSignalCount = useMemo(
+    () =>
+      sectionGroups.filter(
+        (g) => g.kind !== 'future' && groupHasCoverage(g, overrides),
+      ).length,
+    [overrides],
+  )
+
+  const csvShippedCount = useMemo(
+    () => projectsCatalog.filter((p) => csvProjectLooksShipped(p)).length,
+    [],
+  )
+
   const pct =
     stats.total > 0
       ? Math.round((stats.active / stats.total) * 100)
@@ -626,6 +1457,61 @@ function OverviewPanel({
         External tool, Can do, or In progress — those feed your integration
         spine. Planned and Not started do not.
       </p>
+
+      <h3 className="panel-subheading">Suggested first-time flow</h3>
+      <ol className="getting-started-list">
+        <li>
+          <span className="getting-started-step" aria-hidden="true">
+            1
+          </span>
+          <span>
+            <button type="button" className="link-btn" onClick={onGoSections}>
+              Sections
+            </button>{' '}
+            — Set component statuses so each category sends signal into the
+            spine.
+          </span>
+        </li>
+        <li>
+          <span className="getting-started-step" aria-hidden="true">
+            2
+          </span>
+          <span>
+            <button type="button" className="link-btn" onClick={onGoIntegrations}>
+              Integrations
+            </button>{' '}
+            — Confirm the four spine integrations are fed; fix any blocked
+            requirements.
+          </span>
+        </li>
+        <li>
+          <span className="getting-started-step" aria-hidden="true">
+            3
+          </span>
+          <span>
+            <button type="button" className="link-btn" onClick={onGoShowcase}>
+              Showcase
+            </button>{' '}
+            — See what already meets objectives (signal, links, self-ratings).
+          </span>
+        </li>
+        <li>
+          <span className="getting-started-step" aria-hidden="true">
+            4
+          </span>
+          <span>
+            Optional:{' '}
+            <button type="button" className="link-btn" onClick={onGoMastery}>
+              Mastery
+            </button>{' '}
+            for subjective proficiency / % complete;{' '}
+            <button type="button" className="link-btn" onClick={onGoSectionsCsv}>
+              CSV catalog only
+            </button>{' '}
+            in Sections for the imported project list.
+          </span>
+        </li>
+      </ol>
 
       <div className="stats stats-primary">
         <div className="stat-card">
@@ -670,12 +1556,65 @@ function OverviewPanel({
         </div>
       </div>
 
+      <h2 className="panel-heading panel-heading-spaced">
+        Objectives at a glance
+      </h2>
+      <p className="panel-lead muted">
+        The{' '}
+        <button type="button" className="link-btn" onClick={onGoShowcase}>
+          Showcase
+        </button>{' '}
+        tab pulls together what already meets your objectives: satisfied spine
+        integrations (same rules as Integrations), catalog categories with active
+        signal, active CSV projects that look shipped or linkable, and strong
+        self-ratings from Mastery.
+      </p>
+      <div className="stats stats-mix showcase-overview-stats">
+        <div className="stat-card stat-card-compact">
+          <strong>
+            {spineMetCount}/{integrations.length}
+          </strong>
+          <span>Spine objectives met</span>
+        </div>
+        <div className="stat-card stat-card-compact">
+          <strong>{categoriesSignalCount}</strong>
+          <span>Categories with signal</span>
+        </div>
+        <div className="stat-card stat-card-compact">
+          <strong>{csvShippedCount}</strong>
+          <span>Active CSV shipped</span>
+        </div>
+      </div>
+
+      {integrationFocus ? (
+        <div
+          className="callout callout-info"
+          role="region"
+          aria-label="Suggested integration focus"
+        >
+          <p className="callout-title">Suggested integration focus</p>
+          <p className="callout-focus-body">
+            <strong>{integrationFocus.integrationTitle}</strong>
+            {' — '}
+            {integrationFocus.message}{' '}
+            <button type="button" className="link-btn" onClick={onGoIntegrations}>
+              Integrations
+            </button>
+            {' · '}
+            <button type="button" className="link-btn" onClick={onGoSections}>
+              Sections
+            </button>
+          </p>
+        </div>
+      ) : null}
+
       <h2 className="panel-heading panel-heading-spaced">Catalog mastery</h2>
       <p className="panel-lead muted">
         Self-rated <strong>proficiency</strong> and <strong>% complete</strong>{' '}
         per category (section group). <strong>Signal</strong> is derived from
         component statuses in Sections.
       </p>
+      <SignalVsSelfRatedHint id="overview-signal-hint" />
       <div className="stats stats-mix mastery-overview-stats">
         <div className="stat-card stat-card-compact">
           <strong>
@@ -720,6 +1659,9 @@ function OverviewPanel({
           · CSV exports appear as <strong>Projects (CSV catalog)</strong> (Life
           domain). Source:{' '}
           <code className="inline-code">projects-2026-03-23.csv</code>
+          {catalogFreshnessLabel
+            ? ` · Latest row “Updated At” in bundle: ${catalogFreshnessLabel}`
+            : ''}
         </span>
       </p>
 
@@ -730,14 +1672,8 @@ function OverviewPanel({
             {blockedCount > 0 ? (
               <li>
                 <button type="button" className="link-btn" onClick={onGoIntegrations}>
-                  Fix {blockedCount} blocked integration{blockedCount === 1 ? '' : 's'}
-                </button>
-              </li>
-            ) : null}
-            {weak.length > 0 ? (
-              <li>
-                <button type="button" className="link-btn" onClick={onGoGaps}>
-                  Review {weak.length} quiet section group{weak.length === 1 ? '' : 's'}
+                  See what’s blocking ({blockedCount} integration
+                  {blockedCount === 1 ? '' : 's'})
                 </button>
               </li>
             ) : null}
@@ -746,6 +1682,13 @@ function OverviewPanel({
                 Update statuses in Sections
               </button>
             </li>
+            {weak.length > 0 ? (
+              <li>
+                <button type="button" className="link-btn" onClick={onGoGaps}>
+                  Review {weak.length} quiet section group{weak.length === 1 ? '' : 's'}
+                </button>
+              </li>
+            ) : null}
           </ul>
         </div>
       )}
@@ -800,6 +1743,7 @@ function SectionsPanel({
   setKindFilter,
   search,
   setSearch,
+  catalogFreshnessLabel,
 }: {
   groups: SectionGroup[]
   overrides: Record<string, ComponentStatus | undefined>
@@ -809,12 +1753,17 @@ function SectionsPanel({
   setKindFilter: (v: string) => void
   search: string
   setSearch: (v: string) => void
+  catalogFreshnessLabel: string | null
 }) {
   const [openMap, setOpenMap] = useState<Record<string, boolean>>({})
+  const [showAllCsvRows, setShowAllCsvRows] = useState(false)
 
   const defaultOpen = groups.length <= 6
-  const getOpen = (id: string) =>
-    id in openMap ? openMap[id]! : defaultOpen
+  const getOpen = (id: string) => {
+    if (id in openMap) return openMap[id]!
+    if (id === 'csv-projects') return false
+    return defaultOpen
+  }
 
   const expandAll = () => {
     const next: Record<string, boolean> = {}
@@ -853,6 +1802,9 @@ function SectionsPanel({
         </a>
         . Open a group to edit; use <strong>Reset overrides</strong> to reload
         defaults after a registry update.
+        {catalogFreshnessLabel
+          ? ` CSV catalog rows: latest “Updated At” in this bundle is ${catalogFreshnessLabel}.`
+          : ''}
       </p>
 
       <div className="toolbar toolbar-wrap">
@@ -868,6 +1820,7 @@ function SectionsPanel({
             <option value="domain">Life domains</option>
             <option value="addon">Add-ons</option>
             <option value="future">Future</option>
+            <option value={KIND_FILTER_CSV_ONLY}>CSV catalog only</option>
           </select>
         </label>
         <label className="field field-grow">
@@ -898,8 +1851,8 @@ function SectionsPanel({
 
       {groups.length === 0 ? (
         <p className="empty-hint empty-block">
-          Nothing matches this filter. Try clearing search or choosing “All
-          kinds”.
+          Nothing matches this filter. Try clearing search, choosing “All kinds”,
+          or another kind preset (including CSV catalog only).
         </p>
       ) : null}
 
@@ -907,6 +1860,11 @@ function SectionsPanel({
         const gBest = bestGroupStatus(g, overrides)
         const activeN = countActiveComponentsInGroup(g, overrides)
         const totalN = g.components.length
+        const isCsv = g.id === 'csv-projects'
+        const visibleComponents =
+          isCsv && !showAllCsvRows
+            ? g.components.slice(0, CSV_SECTION_PREVIEW_ROWS)
+            : g.components
         return (
           <details
             key={g.id}
@@ -936,8 +1894,8 @@ function SectionsPanel({
                 </span>
               </span>
             </summary>
-            <div className="table-scroll">
-              <table className="comp-table">
+            <div className="table-scroll table-scroll-sticky">
+              <table className="comp-table comp-table-sections">
                 <thead>
                   <tr>
                     <th scope="col">Component</th>
@@ -948,7 +1906,7 @@ function SectionsPanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {g.components.map((c) => {
+                  {visibleComponents.map((c) => {
                     const cur = overrides[c.id] ?? c.defaultStatus
                     const dirty = overrides[c.id] !== undefined
                     return (
@@ -1033,6 +1991,19 @@ function SectionsPanel({
                   })}
                 </tbody>
               </table>
+              {isCsv &&
+              g.components.length > CSV_SECTION_PREVIEW_ROWS &&
+              !showAllCsvRows ? (
+                <div className="csv-table-expand">
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => setShowAllCsvRows(true)}
+                  >
+                    Show all {g.components.length} rows
+                  </button>
+                </div>
+              ) : null}
             </div>
           </details>
         )
@@ -1157,7 +2128,11 @@ function MatrixTable({
 
   return (
     <div className="matrix-block">
-      <div className="matrix-wrap">
+      <p className="matrix-narrow-hint">
+        On a small screen, scroll sideways; the integration name column stays
+        pinned.
+      </p>
+      <div className="matrix-wrap matrix-wrap-sticky">
         <table className="matrix">
           <caption className="matrix-caption">
             Integration spine vs section groups (active coverage only)
@@ -1369,6 +2344,17 @@ function GapsPanel({
           +{noSignal.length - 40} more — narrow with Search on the Sections tab.
         </p>
       ) : null}
+
+      <details className="ux-hint-details gaps-registry-note">
+        <summary className="ux-hint-summary">Registry maintenance</summary>
+        <div className="ux-hint-body">
+          <p>
+            When you change <code className="inline-code">registry.ts</code> or
+            the CSV import, review quiet groups and duplicate or stale components
+            so Showcase and Integrations stay trustworthy.
+          </p>
+        </div>
+      </details>
     </div>
   )
 }

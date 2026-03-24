@@ -23,6 +23,34 @@
   -webkit-font-smoothing: antialiased;
 }
 
+:root[data-theme='light'] {
+  --bg: #f0f2f7;
+  --surface: #ffffff;
+  --surface2: #e8ebf2;
+  --border: #c8d0e0;
+  --text: #141823;
+  --muted: #4a5568;
+  --accent: #059669;
+  --accent-dim: #047857;
+  --warn: #b45309;
+  --bad: #dc2626;
+  --good: #15803d;
+  --focus: #0369a1;
+}
+
+/* Stronger keyboard focus in light mode (WCAG contrast on pale surfaces) */
+:root[data-theme='light'] :where(
+    button,
+    a,
+    input,
+    select,
+    textarea,
+    summary
+  ):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
 *,
 *::before,
 *::after {
