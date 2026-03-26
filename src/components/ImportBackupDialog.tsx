@@ -99,6 +99,13 @@ export function ImportBackupDialog({
     backup.overrides,
     currentOverrides,
   )
+  const statusWouldBeRemovedOnReplaceAll = Object.keys(currentOverrides).reduce(
+    (count, key) =>
+      Object.prototype.hasOwnProperty.call(backup.overrides, key)
+        ? count
+        : count + 1,
+    0,
+  )
   const masteryPrev = countMasteryImportPreview(
     backup.categoryMetrics,
     currentCategoryMetrics,
@@ -130,9 +137,16 @@ export function ImportBackupDialog({
           what is already saved in this browser.
         </p>
         <p className="modal-dialog-meta muted">
-          Statuses: {statusPrev.total} imported keys ({statusPrev.novel} new vs
-          current, {statusPrev.changed} changed)
+          Statuses: {statusPrev.total} keys in this file ({statusPrev.novel} new
+          vs current, {statusPrev.changed} changed)
         </p>
+        {statusWouldBeRemovedOnReplaceAll > 0 ? (
+          <p className="modal-dialog-meta muted">
+            Replace all will remove {statusWouldBeRemovedOnReplaceAll} existing{' '}
+            {statusWouldBeRemovedOnReplaceAll === 1 ? 'status key' : 'status keys'}{' '}
+            not present in this file.
+          </p>
+        ) : null}
         <p className="modal-dialog-meta muted">
           Mastery: {masteryPrev.total} imported categories (
           {masteryPrev.novel} new vs current, {masteryPrev.changed} changed)

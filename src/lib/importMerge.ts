@@ -11,6 +11,10 @@ export type CoverageSnapshot = {
   categoryMetrics: Record<string, CategorySelfMetrics>
 }
 
+function unsupportedImportMode(mode: never): never {
+  throw new Error(`Unsupported import merge mode: ${String(mode)}`)
+}
+
 /** Pure merge rules for JSON import (used by UI + unit tests). */
 export function applyImportMergePlan(
   mode: ImportMergeMode,
@@ -39,6 +43,6 @@ export function applyImportMergePlan(
         categoryMetrics: { ...current.categoryMetrics, ...imported.categoryMetrics },
       }
     default:
-      return { ...current }
+      return unsupportedImportMode(mode)
   }
 }

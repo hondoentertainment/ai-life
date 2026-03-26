@@ -23,6 +23,49 @@ describe('parseCoverageBackupJson', () => {
     expect(r.data.schemaVersion).toBe(4)
   })
 
+  it('parses v2 backup with mastery only', () => {
+    const r = parseCoverageBackupJson(
+      JSON.stringify({
+        categoryMetrics: {
+          g: { proficiency: 42, percentComplete: 80 },
+        },
+      }),
+    )
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.overrides).toEqual({})
+    expect(r.data.categoryMetrics).toEqual({
+      g: { proficiency: 42, percentComplete: 80 },
+    })
+  })
+
+  it('parses v2 backup with null overrides and valid mastery', () => {
+    const r = parseCoverageBackupJson(
+      JSON.stringify({
+        overrides: null,
+        categoryMetrics: {
+          g: { proficiency: 12 },
+        },
+      }),
+    )
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.overrides).toEqual({})
+    expect(r.data.categoryMetrics).toEqual({ g: { proficiency: 12 } })
+  })
+
+  it('rejects v2 backup with no valid status or mastery entries', () => {
+    const r = parseCoverageBackupJson(
+      JSON.stringify({
+        overrides: {},
+        categoryMetrics: {},
+      }),
+    )
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.error).toMatch(/No valid status or mastery entries/i)
+  })
+
   it('parses legacy overrides-only object', () => {
     const r = parseCoverageBackupJson(JSON.stringify({ foo: 'planned' }))
     expect(r.ok).toBe(true)
@@ -36,5 +79,16 @@ describe('parseCoverageBackupJson', () => {
     expect(r.ok).toBe(false)
     if (r.ok) return
     expect(r.error).toMatch(/valid JSON/i)
+  })
+
+  it('rejects v2 backup when categoryMetrics is present but invalid', () => {
+    const r = parseCoverageBackupJson(
+      JSON.stringify({
+        categoryMetrics: [],
+      }),
+    )
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.error).toMatch(/No valid status or mastery entries/i)
   })
 })

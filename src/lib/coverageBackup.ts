@@ -69,19 +69,35 @@ export function parseCoverageBackupJson(text: string):
     return { ok: false, error: 'Backup must be a JSON object.' }
   }
   const p = parsed as Record<string, unknown>
+  const hasOverrides = Object.prototype.hasOwnProperty.call(p, 'overrides')
+  const hasCategoryMetrics = Object.prototype.hasOwnProperty.call(
+    p,
+    'categoryMetrics',
+  )
 
-  if ('overrides' in p && p.overrides && typeof p.overrides === 'object') {
+  if (hasOverrides || hasCategoryMetrics) {
     const exportedAt =
       typeof p.exportedAt === 'string' ? p.exportedAt : undefined
     const schemaVersion =
       typeof p.schemaVersion === 'number' && Number.isFinite(p.schemaVersion)
         ? p.schemaVersion
         : undefined
+    const overrides = sanitizeImportedOverrides(p.overrides)
+    const categoryMetrics = sanitizeImportedMetrics(p.categoryMetrics)
+    if (
+      Object.keys(overrides).length === 0 &&
+      Object.keys(categoryMetrics).length === 0
+    ) {
+      return {
+        ok: false,
+        error: 'No valid status or mastery entries found in backup.',
+      }
+    }
     return {
       ok: true,
       data: {
-        overrides: sanitizeImportedOverrides(p.overrides),
-        categoryMetrics: sanitizeImportedMetrics(p.categoryMetrics),
+        overrides,
+        categoryMetrics,
         exportedAt,
         schemaVersion,
       },

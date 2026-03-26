@@ -41,4 +41,14 @@ describe('applyImportMergePlan', () => {
     expect(out.overrides.c).toBe('can_do')
     expect(out.categoryMetrics.g1?.proficiency).toBe(90)
   })
+
+  it('throws for unsupported mode at runtime', () => {
+    expect(() =>
+      applyImportMergePlan(
+        'invalid_mode' as unknown as Parameters<typeof applyImportMergePlan>[0],
+        current,
+        imported,
+      ),
+    ).toThrow(/Unsupported import merge mode/i)
+  })
 })
