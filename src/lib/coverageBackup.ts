@@ -1,51 +1,20 @@
 import type { CategorySelfMetrics, ComponentStatus } from '../types/lifeSystem'
-
-const STATUS_VALUES = new Set<string>([
-  'implemented',
-  'external',
-  'can_do',
-  'in_progress',
-  'planned',
-  'not_started',
-])
-
-function clampPct(n: number): number {
-  if (Number.isNaN(n)) return 0
-  return Math.min(100, Math.max(0, Math.round(n)))
-}
+import {
+  hasCoverageSnapshotFields,
+  sanitizeCoverageMetrics,
+  sanitizeCoverageOverrides,
+} from './coverageSanitize'
 
 export function sanitizeImportedOverrides(
   raw: unknown,
 ): Record<string, ComponentStatus> {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
-  const o = raw as Record<string, unknown>
-  const out: Record<string, ComponentStatus> = {}
-  for (const [k, v] of Object.entries(o)) {
-    if (typeof v === 'string' && STATUS_VALUES.has(v)) {
-      out[k] = v as ComponentStatus
-    }
-  }
-  return out
+  return sanitizeCoverageOverrides(raw)
 }
 
 export function sanitizeImportedMetrics(
   raw: unknown,
 ): Record<string, CategorySelfMetrics> {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
-  const out: Record<string, CategorySelfMetrics> = {}
-  for (const [gid, v] of Object.entries(raw)) {
-    if (!v || typeof v !== 'object' || Array.isArray(v)) continue
-    const m = v as Record<string, unknown>
-    const next: CategorySelfMetrics = {}
-    if (typeof m.proficiency === 'number')
-      next.proficiency = clampPct(m.proficiency)
-    if (typeof m.percentComplete === 'number')
-      next.percentComplete = clampPct(m.percentComplete)
-    if (next.proficiency !== undefined || next.percentComplete !== undefined) {
-      out[gid] = next
-    }
-  }
-  return out
+  return sanitizeCoverageMetrics(raw)
 }
 
 export type ParsedBackup = {
@@ -69,13 +38,8 @@ export function parseCoverageBackupJson(text: string):
     return { ok: false, error: 'Backup must be a JSON object.' }
   }
   const p = parsed as Record<string, unknown>
-  const hasOverrides = Object.prototype.hasOwnProperty.call(p, 'overrides')
-  const hasCategoryMetrics = Object.prototype.hasOwnProperty.call(
-    p,
-    'categoryMetrics',
-  )
 
-  if (hasOverrides || hasCategoryMetrics) {
+  if (hasCoverageSnapshotFields(p)) {
     const exportedAt =
       typeof p.exportedAt === 'string' ? p.exportedAt : undefined
     const schemaVersion =

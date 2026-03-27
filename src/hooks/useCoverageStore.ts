@@ -1,51 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { CategorySelfMetrics, ComponentStatus } from '../types/lifeSystem'
 import { COVERAGE_STORAGE_KEY_V2 } from '../lib/storageKeys'
+import {
+  clampPct,
+  hasCoverageSnapshotFields,
+  isLegacyCoverageOverridesRecord,
+  sanitizeCoverageMetrics,
+  sanitizeCoverageOverrides,
+} from '../lib/coverageSanitize'
 
 const STORAGE_KEY_V1 = 'ai-life-coverage-v1'
 const STORAGE_KEY_V2 = COVERAGE_STORAGE_KEY_V2
-
-const STATUS_VALUES = new Set<string>([
-  'implemented',
-  'external',
-  'can_do',
-  'in_progress',
-  'planned',
-  'not_started',
-])
-
-function clampPct(n: number): number {
-  if (Number.isNaN(n)) return 0
-  return Math.min(100, Math.max(0, Math.round(n)))
-}
-
-function isLegacyOverridesRecord(
-  obj: unknown,
-): obj is Record<string, ComponentStatus> {
-  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false
-  const o = obj as Record<string, unknown>
-  const keys = Object.keys(o)
-  if (keys.length === 0) return true
-  return keys.every((k) => STATUS_VALUES.has(String(o[k])))
-}
-
-function sanitizeMetrics(raw: unknown): Record<string, CategorySelfMetrics> {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
-  const out: Record<string, CategorySelfMetrics> = {}
-  for (const [gid, v] of Object.entries(raw)) {
-    if (!v || typeof v !== 'object' || Array.isArray(v)) continue
-    const m = v as Record<string, unknown>
-    const next: CategorySelfMetrics = {}
-    if (typeof m.proficiency === 'number')
-      next.proficiency = clampPct(m.proficiency)
-    if (typeof m.percentComplete === 'number')
-      next.percentComplete = clampPct(m.percentComplete)
-    if (next.proficiency !== undefined || next.percentComplete !== undefined) {
-      out[gid] = next
-    }
-  }
-  return out
-}
 
 function loadPersisted(): {
   overrides: Record<string, ComponentStatus>
@@ -56,30 +21,26 @@ function loadPersisted(): {
     const v2raw = localStorage.getItem(STORAGE_KEY_V2)
     if (v2raw) {
       const p = JSON.parse(v2raw) as unknown
-      if (
-        p &&
-        typeof p === 'object' &&
-        !Array.isArray(p) &&
-        'overrides' in p &&
-        p.overrides &&
-        typeof p.overrides === 'object'
-      ) {
-        const po = p as {
-          overrides: Record<string, ComponentStatus>
-          categoryMetrics?: unknown
-        }
-        return {
-          overrides: po.overrides,
-          categoryMetrics: sanitizeMetrics(po.categoryMetrics),
-          migratedFromV1: false,
+      if (p && typeof p === 'object' && !Array.isArray(p)) {
+        const po = p as Record<string, unknown>
+        if (hasCoverageSnapshotFields(po)) {
+          return {
+            overrides: sanitizeCoverageOverrides(po.overrides),
+            categoryMetrics: sanitizeCoverageMetrics(po.categoryMetrics),
+            migratedFromV1: false,
+          }
         }
       }
     }
     const v1raw = localStorage.getItem(STORAGE_KEY_V1)
     if (v1raw) {
       const p = JSON.parse(v1raw) as unknown
-      if (isLegacyOverridesRecord(p)) {
-        return { overrides: p, categoryMetrics: {}, migratedFromV1: true }
+      if (isLegacyCoverageOverridesRecord(p)) {
+        return {
+          overrides: sanitizeCoverageOverrides(p),
+          categoryMetrics: {},
+          migratedFromV1: true,
+        }
       }
     }
   } catch {
