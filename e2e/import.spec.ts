@@ -30,6 +30,14 @@ async function clearCoverageStorage(page: Page) {
   }, COVERAGE_KEYS)
 }
 
+async function getCalendarStatusSelect(page: Page) {
+  await page.goto('/?tab=sections')
+  await page.getByRole('button', { name: 'Expand all' }).click()
+  return page.getByRole('combobox', {
+    name: /Status for Calendar intelligence/,
+  })
+}
+
 test.describe('import', () => {
   test('JSON import replace all applies component override', async ({ page }) => {
     await page.goto('/')
@@ -67,5 +75,37 @@ test.describe('import', () => {
       ),
     ).toBeVisible()
     await expect(page.locator('dialog.modal-dialog')).toHaveCount(0)
+  })
+
+  test('Undo last import restores pre-import coverage', async ({ page }) => {
+    await page.goto('/')
+    await clearCoverageStorage(page)
+    await page.evaluate(() => {
+      localStorage.setItem(
+        'ai-life-coverage-v2',
+        JSON.stringify({
+          overrides: { 'td-cal': 'planned' },
+          categoryMetrics: {},
+        }),
+      )
+    })
+    await page.reload()
+
+    let sel = await getCalendarStatusSelect(page)
+    await expect(sel).toHaveValue('planned')
+
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Import JSON' }).click()
+    await page.locator('input[type="file"]').setInputFiles(minimalFixture)
+    await page.getByRole('button', { name: /replace all/i }).click()
+
+    sel = await getCalendarStatusSelect(page)
+    await expect(sel).toHaveValue('implemented')
+
+    await page.goto('/')
+    await page.getByRole('button', { name: /Undo last import/i }).click()
+
+    sel = await getCalendarStatusSelect(page)
+    await expect(sel).toHaveValue('planned')
   })
 })
