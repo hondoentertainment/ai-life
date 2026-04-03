@@ -1,5 +1,6 @@
 import type { CatalogProject } from '../types/projectCatalog'
 import type { ComponentItem, ComponentStatus, SectionGroup } from '../types/lifeSystem'
+import { CSV_FILENAME } from './csvMeta'
 import { projectsCatalog } from './projectsCatalog'
 
 const GITHUB_ORG = 'hondoentertainment'
@@ -52,12 +53,12 @@ function catalogRowToComponent(p: CatalogProject): ComponentItem {
   }
 }
 
-/** Life-domain section backed by `projects-2026-03-23.csv`. */
+/** Life-domain section backed by the bundled project catalog CSV. */
 export const csvProjectsSection: SectionGroup = {
   id: 'csv-projects',
   kind: 'domain',
   title: 'Projects (CSV catalog)',
   description:
-    'Imported from projects-2026-03-23.csv; replace the file and rebuild to refresh rows.',
+    `Imported from ${CSV_FILENAME}; replace the file and rebuild to refresh rows.`,
   components: projectsCatalog.map(catalogRowToComponent),
 }
